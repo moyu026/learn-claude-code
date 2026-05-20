@@ -30,6 +30,7 @@ s04_subagent_graph.py - 使用 LangGraph 改写 Subagents 示例
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -59,6 +60,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.runnables.graph import MermaidDrawMethod
 
 # @tool 把普通 Python 函数包装成 LangChain Tool。
 # 包装后可以交给 ChatOpenAI.bind_tools(...) 生成 OpenAI-compatible 工具 schema。
@@ -496,7 +498,47 @@ graph = parent_builder.compile(checkpointer=memory)
 
 
 # ------------------------------------------------------------
-# 10. 对外调用封装
+# 10. 图可视化辅助函数
+# ------------------------------------------------------------
+
+def save_graph_png(output_dir: str | Path = "graph") -> tuple[Path, Path]:
+    """
+    把父图和子图导出成 Mermaid PNG。
+
+    LangGraph 编译后的 graph 对象支持：
+
+        app.get_graph().draw_mermaid_png(
+            draw_method=MermaidDrawMethod.API,
+        )
+
+    这里分别导出：
+    - s04_parent_graph.png：父 agent 图，包含 task 工具
+    - s04_child_graph.png：子 agent 图，不包含 task 工具
+
+    MermaidDrawMethod.API 会调用 Mermaid 在线渲染 API；
+    如果当前环境无法访问网络，这一步可能失败，但不影响 agent 正常运行。
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    parent_png = graph.get_graph().draw_mermaid_png(
+        draw_method=MermaidDrawMethod.API,
+    )
+    child_png = child_graph.get_graph().draw_mermaid_png(
+        draw_method=MermaidDrawMethod.API,
+    )
+
+    parent_path = out_dir / "s04_parent_graph.png"
+    child_path = out_dir / "s04_child_graph.png"
+
+    parent_path.write_bytes(parent_png)
+    child_path.write_bytes(child_png)
+
+    return parent_path, child_path
+
+
+# ------------------------------------------------------------
+# 11. 对外调用封装
 # ------------------------------------------------------------
 
 def run_once(query: str, thread_id: str = "default") -> str:
@@ -536,10 +578,25 @@ def agent_loop(messages: list[BaseMessage]) -> None:
 
 
 # ------------------------------------------------------------
-# 11. CLI 入口
+# 12. CLI 入口
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
+    if "--draw-graph" in sys.argv:
+        arg_index = sys.argv.index("--draw-graph")
+        output_dir = sys.argv[arg_index + 1] if len(sys.argv) > arg_index + 1 else "graph"
+        parent_path, child_path = save_graph_png(output_dir)
+        print(f"父图已保存：{parent_path}")
+        print(f"子图已保存：{child_path}")
+        raise SystemExit(0)
+
+    if "--chat" not in sys.argv:
+        parent_path, child_path = save_graph_png("graph")
+        print(f"父图已保存：{parent_path}")
+        print(f"子图已保存：{child_path}")
+        print("如需进入交互式 agent，请运行：python graph/s04_subagent_graph.py --chat")
+        raise SystemExit(0)
+
     thread_id = "cli-session"
 
     while True:
